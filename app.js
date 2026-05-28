@@ -310,7 +310,22 @@ function loadLibrary() {
 }
 
 function mergeLibraryEntries(stored) {
-  return stored && typeof stored === "object" ? stored : {};
+  const existing = stored && typeof stored === "object" ? stored : {};
+  const merged = { ...existing };
+  items.forEach((item) => {
+    FIELD_DEFS.filter((field) => field.libraryKey).forEach((field) => {
+      (item[field.key] || []).forEach((value) => {
+        const key = libraryEntryKey(field.libraryKey, value);
+        merged[key] = {
+          key,
+          name: merged[key]?.name || value,
+          category: field.libraryKey,
+          media: merged[key]?.media || null,
+        };
+      });
+    });
+  });
+  return merged;
 }
 
 function saveItems() {
@@ -562,23 +577,91 @@ function renderLive() {
 
 function renderLibrary() {
   if (!els.libraryList) return;
-  els.libraryList.innerHTML = "";
-  els.emptyLibrary?.classList.remove("hidden");
+  const query = normalize(els.librarySearchInput.value);
+  const entries = Object.values(libraryEntries).filter((entry) => {
+    return !query || normalize([entry.name, tr(entry.category), entry.category].join(" ")).includes(query);
+  });
+  els.libraryList.innerHTML = LIBRARY_DEFS.map((definition) => {
+    const groupEntries = entries
+      .filter((entry) => entry.category === definition.key)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (!groupEntries.length) return "";
+    return `
+      <section class="library-group">
+        <div class="category-head">
+          <h2>${tr(definition.label)}</h2>
+          <span>${groupEntries.length}</span>
+        </div>
+        <div class="library-grid">
+          ${groupEntries
+            .map(
+              (entry) => `
+                <button class="library-entry" type="button" data-edit-library="${escapeHtml(entry.key)}">
+                  <span>
+                    <strong>${escapeHtml(entry.name)}</strong><br />
+                    ${entry.media ? tr("viewPhoto") : tr("addPhoto")}
+                  </span>
+                  <span>${entry.media ? "●" : "+"}</span>
+                </button>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+    `;
+  }).join("");
+  els.emptyLibrary?.classList.toggle("hidden", entries.length > 0);
+  els.libraryList.querySelectorAll("[data-edit-library]").forEach((button) => {
+    button.addEventListener("click", () => openLibraryDialog(button.dataset.editLibrary));
+  });
 }
 
-function saveLibraryFromDialog(event) {
+async function saveLibraryFromDialog(event) {
   event.preventDefault();
+  const currentKey = els.libraryKey.value;
+  const current = libraryEntries[currentKey] || {};
+  const name = els.libraryName.value.trim();
+  const category = els.libraryCategory.value;
+  const nextKey = libraryEntryKey(category, name);
+  const mediaFile = els.libraryMedia.files[0];
+  const media = mediaFile ? await readFileAsDataUrl(mediaFile) : current.media || null;
+  if (currentKey && currentKey !== nextKey) delete libraryEntries[currentKey];
+  libraryEntries[nextKey] = { key: nextKey, name, category, media };
+  saveLibrary();
   els.libraryDialog.close();
+  render();
 }
 
 function removeCurrentLibraryMedia() {
+  const key = els.libraryKey.value;
+  if (libraryEntries[key]) {
+    libraryEntries[key].media = null;
+    saveLibrary();
+  }
   els.libraryMediaPreview.innerHTML = "";
+  render();
 }
 
-function openLibraryMedia() {
-  els.mediaDialogTitle.textContent = tr("photo");
-  els.mediaDialogBody.innerHTML = `<p class="empty">${tr("noEntries")}</p>`;
+function openLibraryMedia(key) {
+  const entry = libraryEntries[key];
+  if (!entry?.media) {
+    openLibraryDialog(key);
+    return;
+  }
+  els.mediaDialogTitle.textContent = entry.name || tr("photo");
+  els.mediaDialogBody.innerHTML = renderMedia(entry.media);
   els.mediaDialog.showModal();
+}
+
+function openLibraryDialog(key) {
+  const entry = libraryEntries[key] || parseLibraryKey(key);
+  els.libraryDialogTitle.textContent = tr("libraryEntry");
+  els.libraryKey.value = key;
+  els.libraryName.value = entry.name || "";
+  els.libraryCategory.value = entry.category || "ingredients";
+  els.libraryMedia.value = "";
+  els.libraryMediaPreview.innerHTML = entry.media ? renderMedia(entry.media) : "";
+  els.libraryDialog.showModal();
 }
 
 function itemCard(item, isLive = false) {
@@ -642,6 +725,16 @@ function libraryEntryKey(category, value) {
   return `${category}:${normalize(value)}`;
 }
 
+function parseLibraryKey(key) {
+  const [category, ...nameParts] = String(key || "ingredients:").split(":");
+  return {
+    key,
+    category,
+    name: nameParts.join(":").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+    media: null,
+  };
+}
+
 function bindItemCards(root) {
   root.querySelectorAll("[data-toggle]").forEach((button) => {
     button.addEventListener("click", (event) => {
@@ -690,6 +783,10 @@ function openItemDialog(item = null) {
   els.itemId.value = item?.id || "";
   els.itemName.value = item?.name || "";
   els.itemIngredients.value = item?.ingredients?.join("\n") || "";
+  els.itemSteps.value = item?.steps?.join("\n") || "";
+  els.itemMistakes.value = item?.mistakes?.join("\n") || "";
+  els.itemServeWith.value = item?.serveWith?.join("\n") || "";
+  els.itemPackaging.value = item?.packaging?.join("\n") || "";
   els.itemAliases.value = item?.aliases?.join("\n") || "";
   els.itemCategory.value = item?.category || "";
   els.itemMedia.value = "";
@@ -708,6 +805,10 @@ async function saveItemFromDialog(event) {
     id: existingId || crypto.randomUUID(),
     name: els.itemName.value.trim(),
     ingredients: splitList(els.itemIngredients.value),
+    steps: splitList(els.itemSteps.value),
+    mistakes: splitList(els.itemMistakes.value),
+    serveWith: splitList(els.itemServeWith.value),
+    packaging: splitList(els.itemPackaging.value),
     aliases: splitList(els.itemAliases.value),
     category: els.itemCategory.value.trim(),
     media,
@@ -760,6 +861,10 @@ function csvRowToItem(row) {
     id: crypto.randomUUID(),
     name: row.name || row.item || row.title || "",
     ingredients: splitList(row.ingredients || row.ingredient || ""),
+    steps: splitList(row.steps || row.step || ""),
+    mistakes: splitList(row.mistakes || row.commonmistakes || row.commonmistake || ""),
+    serveWith: splitList(row.servewith || row.servedwith || ""),
+    packaging: splitList(row.packaging || row.packing || ""),
     category: row.category || "",
     aliases: splitList(row.aliases || row.alias || ""),
     media: null,
@@ -920,7 +1025,18 @@ function splitList(value) {
 }
 
 function searchableText(item) {
-  return normalize([item.name, item.category, item.ingredients.join(" "), item.aliases.join(" ")].join(" "));
+  return normalize(
+    [
+      item.name,
+      item.category,
+      item.ingredients.join(" "),
+      item.steps.join(" "),
+      item.mistakes.join(" "),
+      item.serveWith.join(" "),
+      item.packaging.join(" "),
+      item.aliases.join(" "),
+    ].join(" "),
+  );
 }
 
 function normalize(value) {

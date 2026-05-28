@@ -9,6 +9,8 @@ Static PWA prototype for a menu recipe app.
 - Tap to expand ingredients
 - Plus button to add items to Live
 - Editable item name, ingredients, category, aliases, photo, and video
+- Editable steps, common mistakes, serve-with items, and packing notes
+- Shared library entries for ingredients, common mistakes, serve-with, and packing media
 - Preloaded with 281 Sofia menu item names from the provided CSV files
 - CSV import with `name`, `ingredients`, `category`, and `aliases` columns
 - Camera or image-upload OCR using Tesseract.js
@@ -34,4 +36,8 @@ Then open `http://localhost:4173`.
 
 ## Vercel path
 
-This can deploy as a static site immediately. For shared editing across devices, replace `localStorage` with Supabase, Neon, or Vercel Postgres and move media files to object storage such as Supabase Storage or Vercel Blob.
+This can deploy as a static site immediately. For shared editing across devices, replace `localStorage` with Supabase and move media files to Supabase Storage.
+
+## Supabase
+
+The first Supabase schema is designed for restaurants, menu categories, menu items, shared library entries, and live sessions. Use `scripts/generate-supabase-seed.mjs` to generate a Sofia seed SQL file from `menu-data.js`.
