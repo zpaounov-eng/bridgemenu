@@ -16,6 +16,8 @@
           <h1>Menu Live</h1>
         </div>
         <div class="top-actions">
+          <button id="needsIngredientsBtn" class="status-btn" type="button">Needs 0</button>
+          <button id="usageStatusBtn" class="status-btn" type="button">Demo 0/20</button>
           <div class="flag-toggle" aria-label="Language">
             <button class="flag-btn is-active" type="button" data-language="en" title="English">🇺🇸</button>
             <button class="flag-btn" type="button" data-language="es" title="Espanol">🇪🇸</button>
@@ -195,6 +197,46 @@
         <button class="icon-btn" type="button" data-close-media title="Close">x</button>
       </div>
       <div id="mediaDialogBody" class="media-dialog-body"></div>
+    </dialog>
+
+    <dialog id="usageDialog" class="dialog">
+      <form id="usageForm" method="dialog">
+        <div class="dialog-head">
+          <h2 id="usageDialogTitle">Demo access</h2>
+          <button class="icon-btn" type="button" data-close-usage title="Close">x</button>
+        </div>
+        <p id="usageMessage" class="dialog-copy">Demo edits are limited. Enter the restaurant passcode to keep editing.</p>
+        <label>
+          4 digit passcode
+          <input id="passcodeInput" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" autocomplete="one-time-code" />
+        </label>
+        <p id="passcodeStatus" class="form-status"></p>
+        <div class="dialog-actions">
+          <button class="ghost-btn" type="button" data-close-usage>Cancel</button>
+          <button class="primary-btn" type="submit">Unlock</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="ingredientsGuideDialog" class="dialog">
+      <div class="guide-panel">
+        <div class="dialog-head">
+          <h2 id="ingredientsGuideTitle">Needs ingredients</h2>
+          <button class="icon-btn" type="button" data-close-guide title="Close">x</button>
+        </div>
+        <div id="guideCurrentItem" class="guide-current"></div>
+        <div class="dialog-actions">
+          <button id="guidePrevBtn" class="ghost-btn" type="button">Previous</button>
+          <button id="guideEditBtn" class="primary-btn" type="button">Edit item</button>
+          <button id="guideNextBtn" class="ghost-btn" type="button">Next</button>
+        </div>
+        <label class="file-btn guide-upload">
+          Upload document
+          <input id="guideDocumentInput" type="file" accept="image/*,.txt,.csv,text/plain,text/csv" />
+        </label>
+        <div id="guideStatus" class="scan-status"></div>
+        <div id="guideMatches" class="scan-matches"></div>
+      </div>
     </dialog>
 
     <script src="menu-data.js"></script>

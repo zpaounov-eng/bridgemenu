@@ -1,7 +1,8 @@
-const STORAGE_KEY = "menu-live-items-v1";
-const LIVE_KEY = "menu-live-active-v1";
-const LANG_KEY = "menu-live-language-v1";
-const LIBRARY_KEY = "menu-live-library-v1";
+const DEMO_LIMIT_MS = 30 * 60 * 1000;
+const DEMO_LIMIT_EDITS = 20;
+const RESTAURANT_SLUG = "sofia";
+const SUPABASE_URL = "https://lfktexztaiaqazxiwosz.supabase.co";
+const SUPABASE_KEY = "sb_publishable_3P5IfNNgYiot4GK7mSscXg__RkKQ6zb";
 
 const seedItems = window.MENU_SEED_ITEMS || [];
 const FIELD_DEFS = [
@@ -88,6 +89,25 @@ const translations = {
     removeMedia: "Remove media",
     photo: "Photo",
     usedIn: "Used in",
+    needsIngredients: "Needs",
+    demoAccess: "Demo access",
+    demoLimited: "Demo edits are limited. Enter the restaurant passcode to keep editing.",
+    passcode: "4 digit passcode",
+    unlock: "Unlock",
+    unlocked: "Unlocked",
+    demoStatus: "Demo",
+    accountPrompt: "Demo limit reached. A paid restaurant link can keep editing with the 4 digit menu passcode.",
+    wrongPasscode: "Passcode did not match this restaurant.",
+    checkingPasscode: "Checking passcode...",
+    needsIngredientsTitle: "Needs ingredients",
+    previous: "Previous",
+    next: "Next",
+    editItemButton: "Edit item",
+    uploadDocument: "Upload document",
+    noIngredientItems: "Every item has ingredients.",
+    documentMatched: "Matched document items",
+    documentNoMatches: "No matching item names found in that document.",
+    documentApplied: "Updated matched items with ingredient text where a line had Item: ingredients.",
   },
   es: {
     language: "Idioma",
@@ -159,6 +179,25 @@ const translations = {
     removeMedia: "Quitar media",
     photo: "Foto",
     usedIn: "Usado en",
+    needsIngredients: "Faltan",
+    demoAccess: "Acceso demo",
+    demoLimited: "Las ediciones demo son limitadas. Ingresa el codigo del restaurante para seguir editando.",
+    passcode: "Codigo de 4 digitos",
+    unlock: "Desbloquear",
+    unlocked: "Desbloqueado",
+    demoStatus: "Demo",
+    accountPrompt: "Limite demo alcanzado. Un enlace pagado puede seguir editando con el codigo de 4 digitos.",
+    wrongPasscode: "El codigo no coincide con este restaurante.",
+    checkingPasscode: "Revisando codigo...",
+    needsIngredientsTitle: "Faltan ingredientes",
+    previous: "Anterior",
+    next: "Siguiente",
+    editItemButton: "Editar articulo",
+    uploadDocument: "Subir documento",
+    noIngredientItems: "Todos los articulos tienen ingredientes.",
+    documentMatched: "Articulos encontrados",
+    documentNoMatches: "No se encontraron articulos en ese documento.",
+    documentApplied: "Se actualizaron articulos encontrados donde habia una linea Articulo: ingredientes.",
   },
 };
 
@@ -199,6 +238,11 @@ let currentMatches = [];
 let deferredInstallPrompt = null;
 let stream = null;
 let tesseractLoad = null;
+let usage = loadUsage();
+let guideIndex = 0;
+let restaurantId = null;
+let categoryIdsByName = new Map();
+let supabaseReady = false;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -246,6 +290,8 @@ const els = {
   addMatchesBtn: $("#addMatchesBtn"),
   scanImageInput: $("#scanImageInput"),
   installBtn: $("#installBtn"),
+  needsIngredientsBtn: $("#needsIngredientsBtn"),
+  usageStatusBtn: $("#usageStatusBtn"),
   libraryDialog: $("#libraryDialog"),
   libraryForm: $("#libraryForm"),
   libraryDialogTitle: $("#libraryDialogTitle"),
@@ -258,24 +304,39 @@ const els = {
   mediaDialog: $("#mediaDialog"),
   mediaDialogTitle: $("#mediaDialogTitle"),
   mediaDialogBody: $("#mediaDialogBody"),
+  usageDialog: $("#usageDialog"),
+  usageForm: $("#usageForm"),
+  usageDialogTitle: $("#usageDialogTitle"),
+  usageMessage: $("#usageMessage"),
+  passcodeInput: $("#passcodeInput"),
+  passcodeStatus: $("#passcodeStatus"),
+  ingredientsGuideDialog: $("#ingredientsGuideDialog"),
+  ingredientsGuideTitle: $("#ingredientsGuideTitle"),
+  guideCurrentItem: $("#guideCurrentItem"),
+  guidePrevBtn: $("#guidePrevBtn"),
+  guideEditBtn: $("#guideEditBtn"),
+  guideNextBtn: $("#guideNextBtn"),
+  guideDocumentInput: $("#guideDocumentInput"),
+  guideStatus: $("#guideStatus"),
+  guideMatches: $("#guideMatches"),
 };
 
 render();
 bindEvents();
+syncFromSupabase();
+setInterval(syncFromSupabase, 15000);
+setInterval(renderUsageStatus, 30000);
 registerServiceWorker();
 
 function loadItems() {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) return seedItems.map(normalizeItemRecord);
-  const storedItems = JSON.parse(stored).map(normalizeItemRecord);
-  const hasOldDemoItems = storedItems.some((item) => ["Chicken Bowl", "Veggie Wrap"].includes(item.name));
-  if (hasOldDemoItems && storedItems.length <= 2) return seedItems.map(normalizeItemRecord);
-  return mergeSeedWithStored(seedItems, storedItems);
+  return seedItems.map(normalizeItemRecord);
 }
 
 function normalizeItemRecord(item) {
   return {
     id: item.id || crypto.randomUUID(),
+    dbId: item.dbId || null,
+    externalId: item.externalId || item.external_id || item.id || null,
     name: item.name || "",
     ingredients: item.ingredients || [],
     steps: item.steps || [],
@@ -284,7 +345,7 @@ function normalizeItemRecord(item) {
     packaging: item.packaging || item.packing || [],
     aliases: item.aliases || [],
     category: item.category || "",
-    media: item.media || null,
+    media: item.media || item.media_url || null,
   };
 }
 
@@ -296,17 +357,28 @@ function mergeSeedWithStored(seed, stored) {
 }
 
 function loadLiveIds() {
-  return JSON.parse(localStorage.getItem(LIVE_KEY) || "[]");
+  return [];
 }
 
 function loadLanguage() {
-  const stored = localStorage.getItem(LANG_KEY);
-  return stored && translations[stored] ? stored : "en";
+  return "en";
 }
 
 function loadLibrary() {
-  const stored = JSON.parse(localStorage.getItem(LIBRARY_KEY) || "{}");
-  return mergeLibraryEntries(stored);
+  return mergeLibraryEntries({});
+}
+
+function loadUsage() {
+  return {
+    startedAt: Date.now(),
+    edits: 0,
+    unlocked: false,
+    unlockedAt: null,
+  };
+}
+
+function saveUsage() {
+  return usage;
 }
 
 function mergeLibraryEntries(stored) {
@@ -329,22 +401,21 @@ function mergeLibraryEntries(stored) {
 }
 
 function saveItems() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  return items;
 }
 
 function saveLive() {
-  localStorage.setItem(LIVE_KEY, JSON.stringify(liveIds));
+  return liveIds;
 }
 
 function saveLibrary() {
-  localStorage.setItem(LIBRARY_KEY, JSON.stringify(libraryEntries));
+  return libraryEntries;
 }
 
 function bindEvents() {
   els.languageButtons.forEach((button) => {
     button.addEventListener("click", () => {
       language = button.dataset.language;
-      localStorage.setItem(LANG_KEY, language);
       render();
     });
   });
@@ -352,6 +423,19 @@ function bindEvents() {
   els.librarySearchInput.addEventListener("input", renderLibrary);
   els.libraryForm.addEventListener("submit", saveLibraryFromDialog);
   els.removeLibraryMediaBtn.addEventListener("click", removeCurrentLibraryMedia);
+  els.usageStatusBtn.addEventListener("click", openUsageDialog);
+  els.usageForm.addEventListener("submit", unlockWithPasscode);
+  document.querySelectorAll("[data-close-usage]").forEach((button) => {
+    button.addEventListener("click", () => els.usageDialog.close());
+  });
+  els.needsIngredientsBtn.addEventListener("click", openIngredientsGuide);
+  els.guidePrevBtn.addEventListener("click", () => moveGuide(-1));
+  els.guideNextBtn.addEventListener("click", () => moveGuide(1));
+  els.guideEditBtn.addEventListener("click", editGuideItem);
+  els.guideDocumentInput.addEventListener("change", processGuideDocument);
+  document.querySelectorAll("[data-close-guide]").forEach((button) => {
+    button.addEventListener("click", () => els.ingredientsGuideDialog.close());
+  });
   document.querySelectorAll("[data-close-library]").forEach((button) => {
     button.addEventListener("click", () => els.libraryDialog.close());
   });
@@ -374,8 +458,10 @@ function bindEvents() {
   els.itemForm.addEventListener("submit", saveItemFromDialog);
   els.deleteItemBtn.addEventListener("click", deleteCurrentItem);
   els.clearLiveBtn.addEventListener("click", () => {
+    if (!ensureCanEdit()) return;
     liveIds = [];
     saveLive();
+    recordEdit();
     render();
   });
 
@@ -419,6 +505,8 @@ function render() {
   renderItems();
   renderLive();
   renderLibrary();
+  renderUsageStatus();
+  renderNeedsIngredientsStatus();
   els.liveCount.textContent = liveIds.length;
 }
 
@@ -489,12 +577,230 @@ function applyLanguage() {
   els.libraryCategory.closest("label").childNodes[0].textContent = tr("libraryCategory");
   els.libraryMedia.closest("label").childNodes[0].textContent = tr("media");
   els.removeLibraryMediaBtn.textContent = tr("removeMedia");
+  els.usageDialogTitle.textContent = tr("demoAccess");
+  els.usageMessage.textContent = isDemoExpired() ? tr("accountPrompt") : tr("demoLimited");
+  els.passcodeInput.closest("label").childNodes[0].textContent = tr("passcode");
+  els.usageForm.querySelector('button[type="submit"]').textContent = tr("unlock");
+  els.ingredientsGuideTitle.textContent = tr("needsIngredientsTitle");
+  els.guidePrevBtn.textContent = tr("previous");
+  els.guideNextBtn.textContent = tr("next");
+  els.guideEditBtn.textContent = tr("editItemButton");
+  els.ingredientsGuideDialog.querySelector(".file-btn").childNodes[0].textContent = tr("uploadDocument");
   document.querySelectorAll("[data-close-library]").forEach((button) => {
     if (!button.classList.contains("icon-btn")) button.textContent = tr("cancel");
     button.title = tr("close");
   });
   els.libraryForm.querySelector('button[type="submit"]').textContent = tr("save");
   document.querySelector("[data-close-media]").title = tr("close");
+  document.querySelector("[data-close-usage]").title = tr("close");
+  document.querySelector("[data-close-guide]").title = tr("close");
+}
+
+function renderUsageStatus() {
+  const elapsedMs = Date.now() - usage.startedAt;
+  const minutes = Math.min(30, Math.floor(elapsedMs / 60000));
+  const expired = isDemoExpired();
+  els.usageStatusBtn.textContent = usage.unlocked
+    ? tr("unlocked")
+    : `${tr("demoStatus")} ${usage.edits}/${DEMO_LIMIT_EDITS} · ${minutes}m`;
+  els.usageStatusBtn.classList.toggle("is-unlocked", usage.unlocked);
+  els.usageStatusBtn.classList.toggle("is-warning", expired);
+  if (els.usageDialog.open) {
+    els.usageMessage.textContent = expired ? tr("accountPrompt") : tr("demoLimited");
+  }
+}
+
+function renderNeedsIngredientsStatus() {
+  els.needsIngredientsBtn.textContent = `${tr("needsIngredients")} ${itemsNeedingIngredients().length}`;
+}
+
+function itemsNeedingIngredients() {
+  return items.filter((item) => !item.ingredients?.length);
+}
+
+function isDemoExpired() {
+  if (usage.unlocked) return false;
+  return usage.edits >= DEMO_LIMIT_EDITS || Date.now() - usage.startedAt >= DEMO_LIMIT_MS;
+}
+
+function ensureCanEdit() {
+  if (!isDemoExpired()) return true;
+  openUsageDialog();
+  return false;
+}
+
+function recordEdit() {
+  if (usage.unlocked) return;
+  usage.edits += 1;
+  saveUsage();
+  renderUsageStatus();
+}
+
+function openUsageDialog() {
+  if (els.usageDialog.open) return;
+  els.passcodeInput.value = "";
+  els.passcodeStatus.textContent = "";
+  els.passcodeStatus.className = "form-status";
+  els.usageMessage.textContent = isDemoExpired() ? tr("accountPrompt") : tr("demoLimited");
+  try {
+    els.usageDialog.showModal();
+  } catch (error) {
+    els.usageDialog.show();
+  }
+  setTimeout(() => els.passcodeInput.focus(), 50);
+}
+
+async function unlockWithPasscode(event) {
+  event.preventDefault();
+  const code = els.passcodeInput.value.trim();
+  if (!/^\d{4}$/.test(code)) {
+    showPasscodeStatus(tr("wrongPasscode"), "error");
+    return;
+  }
+  showPasscodeStatus(tr("checkingPasscode"));
+  const isValid = await validateRestaurantPasscode(code);
+  if (!isValid) {
+    showPasscodeStatus(tr("wrongPasscode"), "error");
+    return;
+  }
+  usage.unlocked = true;
+  usage.unlockedAt = new Date().toISOString();
+  saveUsage();
+  showPasscodeStatus(tr("unlocked"), "ok");
+  renderUsageStatus();
+  setTimeout(() => els.usageDialog.close(), 250);
+}
+
+function showPasscodeStatus(message, state = "") {
+  els.passcodeStatus.textContent = message;
+  els.passcodeStatus.className = `form-status${state ? ` is-${state}` : ""}`;
+}
+
+async function validateRestaurantPasscode(code) {
+  try {
+    const result = await supabaseRequest("rpc/validate_restaurant_passcode", {
+      method: "POST",
+      body: JSON.stringify({ menu_slug: RESTAURANT_SLUG, passcode: code }),
+    });
+    return result === true || result?.valid === true;
+  } catch (error) {
+    console.warn("Passcode validation failed", error);
+    return false;
+  }
+}
+
+async function supabaseRequest(path, options = {}) {
+  const headers = {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (options.method && options.method !== "GET" && !headers.Prefer) {
+    headers.Prefer = "return=representation,resolution=merge-duplicates";
+  }
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers,
+  });
+  if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`);
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+async function syncFromSupabase() {
+  if (document.querySelector("dialog[open]")) return;
+  try {
+    const [restaurant] = await supabaseRequest(
+      `restaurants?slug=eq.${encodeURIComponent(RESTAURANT_SLUG)}&select=id,name,slug&limit=1`,
+    );
+    if (!restaurant) return;
+    restaurantId = restaurant.id;
+    const categories = await supabaseRequest(
+      `menu_categories?restaurant_id=eq.${restaurantId}&select=id,name,sort_order&order=sort_order.asc,name.asc`,
+    );
+    categoryIdsByName = new Map(categories.map((category) => [category.name, category.id]));
+    const rows = await supabaseRequest(
+      `menu_items?restaurant_id=eq.${restaurantId}&select=*,menu_categories(name)&order=name.asc`,
+    );
+    if (rows.length) {
+      items = rows.map(dbRowToItem);
+      supabaseReady = true;
+      liveIds = liveIds.filter((id) => items.some((item) => item.id === id));
+      render();
+    }
+  } catch (error) {
+    console.warn("Supabase sync failed", error);
+  }
+}
+
+function dbRowToItem(row) {
+  return normalizeItemRecord({
+    id: row.external_id || row.id,
+    dbId: row.id,
+    externalId: row.external_id || row.id,
+    name: row.name,
+    ingredients: row.ingredients || [],
+    steps: row.steps || [],
+    mistakes: row.mistakes || [],
+    serveWith: row.serve_with || [],
+    packaging: row.packaging || [],
+    aliases: row.aliases || [],
+    category: row.menu_categories?.name || "",
+    media: row.media_url || null,
+  });
+}
+
+async function getCategoryId(name) {
+  const categoryName = name || tr("uncategorized");
+  if (categoryIdsByName.has(categoryName)) return categoryIdsByName.get(categoryName);
+  if (!restaurantId) await syncFromSupabase();
+  const [category] = await supabaseRequest("menu_categories?on_conflict=restaurant_id,name", {
+    method: "POST",
+    body: JSON.stringify([
+      {
+        restaurant_id: restaurantId,
+        name: categoryName,
+        sort_order: categoryIdsByName.size,
+      },
+    ]),
+  });
+  if (category?.id) categoryIdsByName.set(category.name, category.id);
+  return category?.id || null;
+}
+
+async function saveItemToSupabase(item) {
+  if (!restaurantId) await syncFromSupabase();
+  if (!restaurantId) throw new Error("Restaurant was not loaded from Supabase.");
+  const categoryId = await getCategoryId(item.category);
+  const externalId = item.externalId || item.id;
+  const [row] = await supabaseRequest("menu_items?on_conflict=restaurant_id,external_id", {
+    method: "POST",
+    body: JSON.stringify([
+      {
+        restaurant_id: restaurantId,
+        category_id: categoryId,
+        external_id: externalId,
+        name: item.name,
+        ingredients: item.ingredients || [],
+        steps: item.steps || [],
+        mistakes: item.mistakes || [],
+        serve_with: item.serveWith || [],
+        packaging: item.packaging || [],
+        aliases: item.aliases || [],
+        media_url: item.media || null,
+      },
+    ]),
+  });
+  return row ? dbRowToItem({ ...row, menu_categories: { name: item.category } }) : item;
+}
+
+async function deleteItemFromSupabase(item) {
+  if (!item?.dbId) return;
+  await supabaseRequest(`menu_items?id=eq.${item.dbId}`, {
+    method: "DELETE",
+    headers: { Prefer: "return=minimal" },
+  });
 }
 
 function renderItems() {
@@ -568,6 +874,117 @@ function renderCategorySections(filteredItems) {
     .join("");
 }
 
+function openIngredientsGuide() {
+  guideIndex = 0;
+  els.guideStatus.textContent = "";
+  els.guideMatches.innerHTML = "";
+  els.guideDocumentInput.value = "";
+  renderIngredientsGuide();
+  els.ingredientsGuideDialog.showModal();
+}
+
+function renderIngredientsGuide() {
+  const missing = itemsNeedingIngredients();
+  const item = missing[guideIndex];
+  if (!item) {
+    els.guideCurrentItem.innerHTML = `<strong>${tr("noIngredientItems")}</strong>`;
+    els.guideEditBtn.disabled = true;
+    els.guidePrevBtn.disabled = true;
+    els.guideNextBtn.disabled = true;
+    return;
+  }
+  els.guideEditBtn.disabled = false;
+  els.guidePrevBtn.disabled = missing.length < 2;
+  els.guideNextBtn.disabled = missing.length < 2;
+  els.guideCurrentItem.innerHTML = `
+    <strong>${escapeHtml(item.name)}</strong>
+    <span>${escapeHtml(displayCategory(item.category))} · ${guideIndex + 1} / ${missing.length}</span>
+  `;
+}
+
+function moveGuide(direction) {
+  const missing = itemsNeedingIngredients();
+  if (!missing.length) return;
+  guideIndex = (guideIndex + direction + missing.length) % missing.length;
+  renderIngredientsGuide();
+}
+
+function editGuideItem() {
+  const item = itemsNeedingIngredients()[guideIndex];
+  if (!item) return;
+  els.ingredientsGuideDialog.close();
+  openItemDialog(item);
+}
+
+async function processGuideDocument(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (!ensureCanEdit()) {
+    event.target.value = "";
+    return;
+  }
+  els.guideStatus.textContent = file.type.startsWith("image/") ? tr("readingText") : "";
+  const text = file.type.startsWith("image/") ? await ocrDocumentFile(file) : await file.text();
+  const matches = matchItems(text);
+  await applyDocumentIngredients(text, matches);
+  els.guideMatches.innerHTML = matches.map((item) => `<span class="match-chip">${escapeHtml(item.name)}</span>`).join("");
+  els.guideStatus.textContent = matches.length
+    ? `${tr("documentMatched")}: ${matches.length}. ${tr("documentApplied")}`
+    : tr("documentNoMatches");
+  event.target.value = "";
+  render();
+  if (els.ingredientsGuideDialog.open) renderIngredientsGuide();
+}
+
+async function ocrDocumentFile(file) {
+  const tesseract = await loadTesseractForGuide();
+  if (!tesseract) return "";
+  const result = await tesseract.recognize(await readFileAsDataUrl(file), "eng", {
+    logger(message) {
+      if (message.status) {
+        els.guideStatus.textContent = `${message.status}${message.progress ? ` ${Math.round(message.progress * 100)}%` : ""}`;
+      }
+    },
+  });
+  return result.data.text.trim();
+}
+
+async function loadTesseractForGuide() {
+  const previousStatus = els.scanStatus;
+  const tesseract = await loadTesseract();
+  if (!tesseract) els.guideStatus.textContent = tr("ocrMissing");
+  if (previousStatus && !els.scanDialog.open) previousStatus.textContent = tr("scanHelp");
+  return tesseract;
+}
+
+async function applyDocumentIngredients(text, matches) {
+  let changed = false;
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const nextItems = [];
+  for (const item of items) {
+    const matched = matches.find((match) => match.id === item.id);
+    if (!matched) {
+      nextItems.push(item);
+      continue;
+    }
+    const line = lines.find((entry) => normalize(entry).startsWith(normalize(item.name)));
+    const [, rest = ""] = line?.match(/[:\-–]\s*(.+)$/) || [];
+    const ingredients = splitList(rest);
+    if (!ingredients.length) {
+      nextItems.push(item);
+      continue;
+    }
+    changed = true;
+    const updatedItem = { ...item, ingredients };
+    nextItems.push(await saveItemToSupabase(updatedItem));
+  }
+  items = nextItems;
+  if (changed) {
+    saveItems();
+    recordEdit();
+  }
+}
+
 function renderLive() {
   const activeItems = liveIds.map((id) => items.find((item) => item.id === id)).filter(Boolean);
   els.liveList.innerHTML = activeItems.map((item) => itemCard(item, true)).join("");
@@ -618,6 +1035,7 @@ function renderLibrary() {
 
 async function saveLibraryFromDialog(event) {
   event.preventDefault();
+  if (!ensureCanEdit()) return;
   const currentKey = els.libraryKey.value;
   const current = libraryEntries[currentKey] || {};
   const name = els.libraryName.value.trim();
@@ -628,15 +1046,18 @@ async function saveLibraryFromDialog(event) {
   if (currentKey && currentKey !== nextKey) delete libraryEntries[currentKey];
   libraryEntries[nextKey] = { key: nextKey, name, category, media };
   saveLibrary();
+  recordEdit();
   els.libraryDialog.close();
   render();
 }
 
 function removeCurrentLibraryMedia() {
+  if (!ensureCanEdit()) return;
   const key = els.libraryKey.value;
   if (libraryEntries[key]) {
     libraryEntries[key].media = null;
     saveLibrary();
+    recordEdit();
   }
   els.libraryMediaPreview.innerHTML = "";
   render();
@@ -654,6 +1075,10 @@ function openLibraryMedia(key) {
 }
 
 function openLibraryDialog(key) {
+  if (isDemoExpired()) {
+    openUsageDialog();
+    return;
+  }
   const entry = libraryEntries[key] || parseLibraryKey(key);
   els.libraryDialogTitle.textContent = tr("libraryEntry");
   els.libraryKey.value = key;
@@ -764,20 +1189,28 @@ function bindItemCards(root) {
 }
 
 function addToLive(id) {
+  if (!ensureCanEdit()) return;
   if (!liveIds.includes(id)) {
     liveIds.push(id);
     saveLive();
+    recordEdit();
     render();
   }
 }
 
 function removeFromLive(id) {
+  if (!ensureCanEdit()) return;
   liveIds = liveIds.filter((liveId) => liveId !== id);
   saveLive();
+  recordEdit();
   render();
 }
 
 function openItemDialog(item = null) {
+  if (isDemoExpired()) {
+    openUsageDialog();
+    return;
+  }
   const isNew = !item;
   els.itemDialogTitle.textContent = isNew ? tr("newItem") : tr("editItem");
   els.itemId.value = item?.id || "";
@@ -797,12 +1230,15 @@ function openItemDialog(item = null) {
 
 async function saveItemFromDialog(event) {
   event.preventDefault();
+  if (!ensureCanEdit()) return;
   const existingId = els.itemId.value;
   const mediaFile = els.itemMedia.files[0];
   const existing = items.find((item) => item.id === existingId);
   const media = mediaFile ? await readFileAsDataUrl(mediaFile) : existing?.media || null;
   const item = {
     id: existingId || crypto.randomUUID(),
+    dbId: existing?.dbId || null,
+    externalId: existing?.externalId || existingId || null,
     name: els.itemName.value.trim(),
     ingredients: splitList(els.itemIngredients.value),
     steps: splitList(els.itemSteps.value),
@@ -814,20 +1250,38 @@ async function saveItemFromDialog(event) {
     media,
   };
 
-  if (existingId) items = items.map((entry) => (entry.id === existingId ? item : entry));
-  else items.unshift(item);
+  try {
+    const savedItem = await saveItemToSupabase(item);
+    if (existingId) items = items.map((entry) => (entry.id === existingId ? savedItem : entry));
+    else items.unshift(savedItem);
+  } catch (error) {
+    console.error("Supabase item save failed", error);
+    alert("Could not save to Supabase. Check the connection and try again.");
+    return;
+  }
 
   saveItems();
+  recordEdit();
   els.itemDialog.close();
   render();
 }
 
-function deleteCurrentItem() {
+async function deleteCurrentItem() {
+  if (!ensureCanEdit()) return;
   const id = els.itemId.value;
+  const existing = items.find((item) => item.id === id);
+  try {
+    await deleteItemFromSupabase(existing);
+  } catch (error) {
+    console.error("Supabase item delete failed", error);
+    alert("Could not delete from Supabase. Check the connection and try again.");
+    return;
+  }
   items = items.filter((item) => item.id !== id);
   liveIds = liveIds.filter((liveId) => liveId !== id);
   saveItems();
   saveLive();
+  recordEdit();
   els.itemDialog.close();
   render();
 }
@@ -847,11 +1301,26 @@ function renderMedia(media) {
 async function importCsv(event) {
   const file = event.target.files[0];
   if (!file) return;
+  if (!ensureCanEdit()) {
+    event.target.value = "";
+    return;
+  }
   const text = await file.text();
   const rows = parseCsv(text);
   const imported = rows.map(csvRowToItem).filter((item) => item.name);
-  items = mergeItems(imported, items);
+  try {
+    const savedImported = [];
+    for (const item of imported) {
+      savedImported.push(await saveItemToSupabase(item));
+    }
+    items = mergeItems(savedImported, items);
+  } catch (error) {
+    console.error("Supabase CSV import failed", error);
+    alert("Could not import to Supabase. Check the connection and try again.");
+    return;
+  }
   saveItems();
+  recordEdit();
   event.target.value = "";
   render();
 }
@@ -1008,10 +1477,16 @@ function renderMatches() {
 }
 
 function addMatchesToLive() {
+  if (!ensureCanEdit()) return;
+  let changed = false;
   currentMatches.forEach((item) => {
-    if (!liveIds.includes(item.id)) liveIds.push(item.id);
+    if (!liveIds.includes(item.id)) {
+      liveIds.push(item.id);
+      changed = true;
+    }
   });
   saveLive();
+  if (changed) recordEdit();
   render();
   closeScanDialog();
   setTab("live");

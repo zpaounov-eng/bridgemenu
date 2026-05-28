@@ -71,6 +71,29 @@ button {
   gap: 8px;
 }
 
+.status-btn {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--accent-strong);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.status-btn.is-warning {
+  border-color: rgba(180, 35, 24, 0.24);
+  background: #fff7f6;
+  color: var(--danger);
+}
+
+.status-btn.is-unlocked {
+  border-color: var(--accent);
+  background: #dff7f2;
+}
+
 .flag-btn {
   width: 46px;
   min-height: 42px;
@@ -458,7 +481,8 @@ textarea {
 }
 
 .dialog form,
-.scan-dialog {
+.scan-dialog,
+.guide-panel {
   padding: 16px;
 }
 
@@ -491,6 +515,53 @@ textarea {
   color: var(--muted);
   font-size: 14px;
   padding: 16px 4px;
+}
+
+.dialog-copy,
+.form-status {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.form-status {
+  min-height: 20px;
+  padding: 0;
+}
+
+.form-status.is-error {
+  color: var(--danger);
+}
+
+.form-status.is-ok {
+  color: var(--accent-strong);
+}
+
+.guide-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.guide-current {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.guide-current strong {
+  font-size: 18px;
+}
+
+.guide-current span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.guide-upload {
+  width: fit-content;
 }
 
 .scan-matches {
@@ -528,12 +599,17 @@ textarea {
 
   .top-actions {
     width: 100%;
+    flex-wrap: wrap;
     align-items: stretch;
   }
 
   .flag-toggle {
     flex: 1;
     align-items: stretch;
+  }
+
+  .status-btn {
+    flex: 1 1 120px;
   }
 
   .toolband,
