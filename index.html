@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8fafc" />
+    <title>Menu Live</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Menu recipe PWA</p>
+          <h1>Menu Live</h1>
+        </div>
+        <div class="top-actions">
+          <div class="flag-toggle" aria-label="Language">
+            <button class="flag-btn is-active" type="button" data-language="en" title="English">🇺🇸</button>
+            <button class="flag-btn" type="button" data-language="es" title="Espanol">🇪🇸</button>
+          </div>
+          <button id="installBtn" class="icon-btn hidden" type="button" title="Install app">Install</button>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="Primary">
+        <button class="tab is-active" type="button" data-tab="items">Items</button>
+        <button class="tab" type="button" data-tab="live">Live <span id="liveCount">0</span></button>
+        <button class="tab" type="button" data-tab="library">Library</button>
+      </nav>
+
+      <main>
+        <section id="itemsView" class="view is-active" aria-label="Items">
+          <div class="toolband">
+            <label class="search-field">
+              <span>Search</span>
+              <input id="searchInput" type="search" placeholder="Item, ingredient, alias..." autocomplete="off" />
+            </label>
+            <div class="actions">
+              <button id="backToCategoriesBtn" class="ghost-btn hidden" type="button">Categories</button>
+              <label class="file-btn">
+                Import CSV
+                <input id="csvInput" type="file" accept=".csv,text/csv" />
+              </label>
+              <button id="newItemBtn" class="primary-btn" type="button">New Item</button>
+            </div>
+          </div>
+
+          <div id="itemList" class="item-list"></div>
+          <p id="emptyItems" class="empty hidden">No items match that search.</p>
+        </section>
+
+        <section id="liveView" class="view" aria-label="Live">
+          <div class="toolband">
+            <div>
+              <p class="eyebrow">Active items</p>
+              <h2>Today&apos;s live list</h2>
+            </div>
+            <div class="actions">
+              <button id="scanBtn" class="primary-btn" type="button">Scan Slip</button>
+              <button id="clearLiveBtn" class="ghost-btn" type="button">Clear</button>
+            </div>
+          </div>
+          <div id="liveList" class="item-list"></div>
+          <p id="emptyLive" class="empty">Add items manually or scan a printed slip.</p>
+        </section>
+
+        <section id="libraryView" class="view" aria-label="Library">
+          <div class="toolband">
+            <label class="search-field">
+              <span>Search Library</span>
+              <input id="librarySearchInput" type="search" placeholder="Ingredient, mistake, packing..." autocomplete="off" />
+            </label>
+          </div>
+          <div id="libraryList" class="library-list"></div>
+          <p id="emptyLibrary" class="empty hidden">No library entries yet.</p>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="itemDialog" class="dialog">
+      <form id="itemForm" method="dialog">
+        <div class="dialog-head">
+          <h2 id="itemDialogTitle">Edit Item</h2>
+          <button class="icon-btn" type="button" data-close-dialog title="Close">x</button>
+        </div>
+        <input id="itemId" type="hidden" />
+        <label>
+          Item name
+          <input id="itemName" required />
+        </label>
+        <label>
+          Ingredients
+          <textarea id="itemIngredients" rows="5" placeholder="One ingredient per line or comma separated"></textarea>
+        </label>
+        <label>
+          Steps
+          <textarea id="itemSteps" rows="5" placeholder="One step per line or comma separated"></textarea>
+        </label>
+        <label>
+          Common mistakes
+          <textarea id="itemMistakes" rows="4" placeholder="One mistake per line or comma separated"></textarea>
+        </label>
+        <label>
+          Serve with
+          <textarea id="itemServeWith" rows="3" placeholder="One serve-with item per line or comma separated"></textarea>
+        </label>
+        <label>
+          Packing
+          <textarea id="itemPackaging" rows="3" placeholder="One packing item per line or comma separated"></textarea>
+        </label>
+        <label>
+          Aliases
+          <textarea id="itemAliases" rows="3" placeholder="Optional OCR-friendly names, one per line"></textarea>
+        </label>
+        <label>
+          Category
+          <input id="itemCategory" />
+        </label>
+        <label>
+          Photo or video
+          <input id="itemMedia" type="file" accept="image/*,video/*" />
+        </label>
+        <div id="mediaPreview" class="media-preview"></div>
+        <div class="dialog-actions">
+          <button id="deleteItemBtn" class="danger-btn" type="button">Delete</button>
+          <button class="ghost-btn" type="button" data-close-dialog>Cancel</button>
+          <button class="primary-btn" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="scanDialog" class="dialog scan-dialog">
+      <div class="dialog-head">
+        <h2>Scan Slip</h2>
+        <button class="icon-btn" type="button" data-close-scan title="Close">x</button>
+      </div>
+      <div class="camera-panel">
+        <video id="cameraVideo" playsinline muted></video>
+        <canvas id="captureCanvas" class="hidden"></canvas>
+      </div>
+      <div class="dialog-actions">
+        <label class="file-btn">
+          Use Image
+          <input id="scanImageInput" type="file" accept="image/*" />
+        </label>
+        <button id="captureBtn" class="primary-btn" type="button">Capture Text</button>
+      </div>
+      <div id="scanStatus" class="scan-status">Camera OCR works on HTTPS or localhost. Deployed Vercel is fine.</div>
+      <div id="scanMatches" class="scan-matches"></div>
+      <textarea id="scanText" rows="5" placeholder="OCR text appears here. You can edit it and match again."></textarea>
+      <div class="dialog-actions">
+        <button id="matchTextBtn" class="ghost-btn" type="button">Match Text</button>
+        <button id="addMatchesBtn" class="primary-btn" type="button">Add Matches</button>
+      </div>
+    </dialog>
+
+    <dialog id="libraryDialog" class="dialog">
+      <form id="libraryForm" method="dialog">
+        <div class="dialog-head">
+          <h2 id="libraryDialogTitle">Library Entry</h2>
+          <button class="icon-btn" type="button" data-close-library title="Close">x</button>
+        </div>
+        <input id="libraryKey" type="hidden" />
+        <label>
+          Name
+          <input id="libraryName" required />
+        </label>
+        <label>
+          Library category
+          <select id="libraryCategory">
+            <option value="ingredients">Ingredients</option>
+            <option value="mistakes">Common mistakes</option>
+            <option value="serveWith">Serve with</option>
+            <option value="packaging">Packing</option>
+          </select>
+        </label>
+        <label>
+          Photo or video
+          <input id="libraryMedia" type="file" accept="image/*,video/*" />
+        </label>
+        <div id="libraryMediaPreview" class="media-preview"></div>
+        <div class="dialog-actions">
+          <button id="removeLibraryMediaBtn" class="danger-btn" type="button">Remove media</button>
+          <button class="ghost-btn" type="button" data-close-library>Cancel</button>
+          <button class="primary-btn" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="mediaDialog" class="dialog media-dialog">
+      <div class="dialog-head">
+        <h2 id="mediaDialogTitle">Photo</h2>
+        <button class="icon-btn" type="button" data-close-media title="Close">x</button>
+      </div>
+      <div id="mediaDialogBody" class="media-dialog-body"></div>
+    </dialog>
+
+    <script src="menu-data.js"></script>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
